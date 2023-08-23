@@ -179,6 +179,8 @@ public:
                 m_component_format = Struct::Type::Float32;
             }
         }
+
+        props.mark_queried("banner"); // no banner in Mitsuba 2
     }
 
     void set_destination_file(const fs::path &dest_file) override {
@@ -192,8 +194,8 @@ public:
         channels_sorted.push_back("B");
         std::sort(channels_sorted.begin(), channels_sorted.end());
         for (size_t i = 1; i < channels.size(); ++i) {
-            if (channels[i] == channels[i - 1])
-                Throw("Film::prepare(): duplicate channel name \"%s\"", channels[i]);
+            if (channels_sorted[i] == channels_sorted[i - 1])
+                Throw("Film::prepare(): duplicate channel name \"%s\"", channels_sorted[i]);
         }
 
         m_storage = new ImageBlock(m_crop_size, channels.size());

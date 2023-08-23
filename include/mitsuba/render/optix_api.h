@@ -38,6 +38,7 @@
 # define OPTIX_BUILD_OPERATION_UPDATE 0x2162
 # define OPTIX_PROPERTY_TYPE_COMPACTED_SIZE 0x2181
 # define OPTIX_GEOMETRY_FLAG_NONE 0
+# define OPTIX_GEOMETRY_FLAG_DISABLE_ANYHIT 1
 # define OPTIX_INSTANCE_FLAG_NONE 0
 # define OPTIX_BUILD_INPUT_TYPE_TRIANGLES 0x2141
 # define OPTIX_BUILD_INPUT_TYPE_CUSTOM_PRIMITIVES 0x2142
@@ -56,6 +57,7 @@ using OptixModule        = struct OptixModule_t*;
 using OptixProgramGroup  = struct OptixProgramGroup_t*;
 using OptixQueryFunctionTableOptions = void*;
 using OptixLogCallback = void (*)(unsigned int, const char*, const char*, void*);
+using OptixTraversableHandle = unsigned long long;
 
 struct OptixDeviceContextOptions {
     OptixLogCallback logCallbackFunction;
@@ -221,31 +223,30 @@ struct OptixBuildInput {
     };
 };
 
-using OptixTraversableHandle = unsigned long long;
-
 // Driver API
-extern const char* (*optixGetErrorName)(OptixResult);
-extern const char* (*optixGetErrorString)(OptixResult);
-extern OptixResult (*optixDeviceContextCreate)(CUcontext, const OptixDeviceContextOptions*, OptixDeviceContext*);
-extern OptixResult (*optixDeviceContextDestroy)(OptixDeviceContext);
-extern OptixResult (*optixModuleCreateFromPTX)(OptixDeviceContext, const OptixModuleCompileOptions*, const OptixPipelineCompileOptions*, const char*, size_t, char*, size_t*, OptixModule*);
-extern OptixResult (*optixModuleDestroy)(OptixModule);
-extern OptixResult (*optixProgramGroupCreate)(OptixDeviceContext, const OptixProgramGroupDesc*, unsigned int, const OptixProgramGroupOptions*, char*, size_t*, OptixProgramGroup*);
-extern OptixResult (*optixProgramGroupDestroy)(OptixProgramGroup);
-extern OptixResult (*optixPipelineCreate)(OptixDeviceContext, const OptixPipelineCompileOptions*, const OptixPipelineLinkOptions*, const OptixProgramGroup*, unsigned int, char*, size_t*, OptixPipeline*);
-extern OptixResult (*optixPipelineDestroy)(OptixPipeline);
-extern OptixResult (*optixAccelComputeMemoryUsage)(OptixDeviceContext, const OptixAccelBuildOptions*, const OptixBuildInput*, unsigned int, OptixAccelBufferSizes*);
-extern OptixResult (*optixAccelBuild)(OptixDeviceContext, CUstream, const OptixAccelBuildOptions*, const OptixBuildInput*,unsigned int, CUdeviceptr, size_t, CUdeviceptr, size_t, OptixTraversableHandle*, const OptixAccelEmitDesc*, unsigned int);
-extern OptixResult (*optixAccelCompact)(OptixDeviceContext, CUstream,  OptixTraversableHandle, CUdeviceptr, size_t, OptixTraversableHandle*);
-extern OptixResult (*optixSbtRecordPackHeader)(OptixProgramGroup, void*);
-extern OptixResult (*optixLaunch)(OptixPipeline, CUstream, CUdeviceptr, size_t, const OptixShaderBindingTable*, unsigned int, unsigned int, unsigned int);
-extern OptixResult (*optixQueryFunctionTable)(int, unsigned int, OptixQueryFunctionTableOptions*, const void**, void*, size_t);
+extern MTS_EXPORT_RENDER const char* (*optixGetErrorName)(OptixResult);
+extern MTS_EXPORT_RENDER const char* (*optixGetErrorString)(OptixResult);
+extern MTS_EXPORT_RENDER OptixResult (*optixDeviceContextCreate)(CUcontext, const OptixDeviceContextOptions*, OptixDeviceContext*);
+extern MTS_EXPORT_RENDER OptixResult (*optixDeviceContextDestroy)(OptixDeviceContext);
+extern MTS_EXPORT_RENDER OptixResult (*optixModuleCreateFromPTX)(OptixDeviceContext, const OptixModuleCompileOptions*, const OptixPipelineCompileOptions*, const char*, size_t, char*, size_t*, OptixModule*);
+extern MTS_EXPORT_RENDER OptixResult (*optixModuleDestroy)(OptixModule);
+extern MTS_EXPORT_RENDER OptixResult (*optixProgramGroupCreate)(OptixDeviceContext, const OptixProgramGroupDesc*, unsigned int, const OptixProgramGroupOptions*, char*, size_t*, OptixProgramGroup*);
+extern MTS_EXPORT_RENDER OptixResult (*optixProgramGroupDestroy)(OptixProgramGroup);
+extern MTS_EXPORT_RENDER OptixResult (*optixPipelineCreate)(OptixDeviceContext, const OptixPipelineCompileOptions*, const OptixPipelineLinkOptions*, const OptixProgramGroup*, unsigned int, char*, size_t*, OptixPipeline*);
+extern MTS_EXPORT_RENDER OptixResult (*optixPipelineDestroy)(OptixPipeline);
+extern MTS_EXPORT_RENDER OptixResult (*optixAccelComputeMemoryUsage)(OptixDeviceContext, const OptixAccelBuildOptions*, const OptixBuildInput*, unsigned int, OptixAccelBufferSizes*);
+extern MTS_EXPORT_RENDER OptixResult (*optixAccelBuild)(OptixDeviceContext, CUstream, const OptixAccelBuildOptions*, const OptixBuildInput*,unsigned int, CUdeviceptr, size_t, CUdeviceptr, size_t, OptixTraversableHandle*, const OptixAccelEmitDesc*, unsigned int);
+extern MTS_EXPORT_RENDER OptixResult (*optixAccelCompact)(OptixDeviceContext, CUstream, OptixTraversableHandle, CUdeviceptr, size_t, OptixTraversableHandle*);
+extern MTS_EXPORT_RENDER OptixResult (*optixSbtRecordPackHeader)(OptixProgramGroup, void*);
+extern MTS_EXPORT_RENDER OptixResult (*optixLaunch)(OptixPipeline, CUstream, CUdeviceptr, size_t, const OptixShaderBindingTable*, unsigned int, unsigned int, unsigned int);
+extern MTS_EXPORT_RENDER OptixResult (*optixQueryFunctionTable)(int, unsigned int, OptixQueryFunctionTableOptions*, const void**, void*, size_t);
+
 #endif
 
 NAMESPACE_BEGIN(mitsuba)
 /// Try to load the OptiX library
-MTS_EXPORT_RENDER extern bool optix_initialize();
-MTS_EXPORT_RENDER extern void optix_shutdown();
+extern MTS_EXPORT_RENDER bool optix_initialize();
+extern MTS_EXPORT_RENDER void optix_shutdown();
 
 static size_t optix_log_buffer_size;
 static char optix_log_buffer[2024];
@@ -253,8 +254,8 @@ static char optix_log_buffer[2024];
 #define rt_check(err)     __rt_check(err, __FILE__, __LINE__)
 #define rt_check_log(err) __rt_check_log(err, __FILE__, __LINE__)
 
-void __rt_check(OptixResult errval, const char *file, const int line);
-void __rt_check_log(OptixResult errval, const char *file, const int line);
+extern MTS_EXPORT_RENDER void __rt_check(OptixResult errval, const char *file, const int line);
+extern MTS_EXPORT_RENDER void __rt_check_log(OptixResult errval, const char *file, const int line);
 
 NAMESPACE_END(mitsuba)
 

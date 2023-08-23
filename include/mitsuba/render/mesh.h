@@ -16,7 +16,7 @@ template <typename Float, typename Spectrum>
 class MTS_EXPORT_RENDER Mesh : public Shape<Float, Spectrum> {
 public:
     MTS_IMPORT_TYPES()
-    MTS_IMPORT_BASE(Shape, m_to_world, m_mesh, set_children)
+    MTS_IMPORT_BASE(Shape, m_to_world, set_children)
 
     // Mesh is always stored in single precision
     using InputFloat = float;
@@ -157,14 +157,10 @@ public:
     barycentric_coordinates(const SurfaceInteraction3f &si,
                             Mask active = true) const;
 
-    virtual void fill_surface_interaction(const Ray3f &ray,
-                                          const Float *cache,
-                                          SurfaceInteraction3f &si,
-                                          Mask active = true) const override;
-
-    virtual std::pair<Vector3f, Vector3f>
-    normal_derivative(const SurfaceInteraction3f &si,
-                      bool shading_frame = true, Mask active = true) const override;
+    virtual SurfaceInteraction3f compute_surface_interaction(const Ray3f &ray,
+                                                             PreliminaryIntersection3f pi,
+                                                             HitComputeFlags flags,
+                                                             Mask active = true) const override;
 
     virtual UnpolarizedSpectrum eval_attribute(const std::string &name,
                                                const SurfaceInteraction3f &si,
@@ -175,6 +171,9 @@ public:
     virtual Color3f eval_attribute_3(const std::string& name,
                                      const SurfaceInteraction3f &si,
                                      Mask active = true) const override;
+
+    virtual SurfaceInteraction3f eval_parameterization(const Point2f &uv,
+                                                       Mask active = true) const override;
 
     /** \brief Ray-triangle intersection test
      *
@@ -192,9 +191,9 @@ public:
      *    \c v contains the first two components of the intersection in
      *    barycentric coordinates
      */
-    MTS_INLINE std::tuple<Mask, Float, Float, Float>
-    ray_intersect_triangle(const ScalarIndex &index, const Ray3f &ray,
-                           identity_t<Mask> active = true) const {
+    MTS_INLINE PreliminaryIntersection3f
+    ray_intersect_triangle(const UInt32 &index, const Ray3f &ray,
+                           Mask active = true) const {
         auto fi = face_indices(index);
 
         Point3f p0 = vertex_position(fi[0]),
@@ -217,12 +216,18 @@ public:
         Float t = dot(e2, qvec) * inv_det;
         active &= t >= ray.mint && t <= ray.maxt;
 
-        return { active, u, v, t };
+        PreliminaryIntersection3f pi = zero<PreliminaryIntersection3f>();
+        pi.t = select(active, t, math::Infinity<Float>);
+        pi.prim_uv = Point2f(u, v);
+        pi.prim_index = index;
+        pi.shape = this;
+
+        return pi;
     }
 
 #if defined(MTS_ENABLE_EMBREE)
     /// Return the Embree version of this shape
-    virtual RTCGeometry embree_geometry(RTCDevice device) const override;
+    virtual RTCGeometry embree_geometry(RTCDevice device) override;
 #endif
 
 #if defined(MTS_ENABLE_OPTIX)
@@ -236,6 +241,7 @@ public:
 
     void traverse(TraversalCallback *callback) override;
     void parameters_changed(const std::vector<std::string> &/*keys*/ = {}) override;
+    bool parameters_grad_enabled() const override;
 
     /// Return a human-readable string representation of the shape contents.
     virtual std::string to_string() const override;
@@ -245,21 +251,30 @@ public:
 
 protected:
     Mesh(const Properties &);
-    inline Mesh() { m_mesh = true; }
+    inline Mesh() {}
     virtual ~Mesh();
 
     /**
      * \brief Build internal tables for sampling uniformly wrt. area.
      *
-     * Computes the surface area and sets up \ref m_area_distribution.
+     * Computes the surface area and sets up \c m_area_pmf
      * Thread-safe, since it uses a mutex.
      */
-    void area_distr_build();
+    void build_pmf();
+
+    /**
+     * \brief Initialize the \c m_parameterization field for mapping UV
+     * coordinates to positions
+     *
+     * Internally, the function creates a nested scene to leverage optimized
+     * ray tracing functionality in \ref eval_parameterization()
+     */
+    void build_parameterization();
 
     // Ensures that the sampling table are ready.
-    ENOKI_INLINE void area_distr_ensure() const {
-        if (unlikely(m_area_distr.empty()))
-            const_cast<Mesh *>(this)->area_distr_build();
+    ENOKI_INLINE void ensure_pmf_built() const {
+        if (unlikely(m_area_pmf.empty()))
+            const_cast<Mesh *>(this)->build_pmf();
     }
 
     MTS_DECLARE_CLASS()
@@ -268,6 +283,7 @@ protected:
     enum MeshAttributeType {
         Vertex, Face
     };
+
     struct MeshAttribute {
         size_t size;
         MeshAttributeType type;
@@ -333,33 +349,21 @@ protected:
 
     std::unordered_map<std::string, MeshAttribute> m_mesh_attributes;
 
-    // END NEW DESIGN
-
 #if defined(MTS_ENABLE_OPTIX)
     void* m_vertex_buffer_ptr;
-    static const uint32_t triangle_input_flags[1];
 #endif
 
     /// Flag that can be set by the user to disable loading/computation of vertex normals
     bool m_disable_vertex_normals = false;
 
     /* Surface area distribution -- generated on demand when \ref
-       prepare_area_distr() is first called. */
-    DiscreteDistribution<Float> m_area_distr;
+       prepare_area_pmf() is first called. */
+    DiscreteDistribution<Float> m_area_pmf;
     tbb::spin_mutex m_mutex;
+
+    /// Optional: used in eval_parameterization()
+    ref<Scene<Float, Spectrum>> m_parameterization;
 };
 
 MTS_EXTERN_CLASS_RENDER(Mesh)
 NAMESPACE_END(mitsuba)
-
-// -----------------------------------------------------------------------
-//! @{ \name Enoki accessors for dynamic vectorization
-// -----------------------------------------------------------------------
-
-// // Enable usage of array pointers for our types
-// ENOKI_CALL_SUPPORT_TEMPLATE_BEGIN(mitsuba::Mesh)
-//     ENOKI_CALL_SUPPORT_METHOD(fill_surface_interaction)
-// ENOKI_CALL_SUPPORT_TEMPLATE_END(mitsuba::Mesh)
-
-//! @}
-// -----------------------------------------------------------------------

@@ -21,9 +21,11 @@ Distant directional emitter (:monosp:`directional`)
       - Spectral irradiance, which corresponds to the amount of spectral power
         per unit area received by a hypothetical surface normal to the specified
         direction.
+
     * - to_world
       - |transform|
       - Emitter-to-world transformation matrix.
+
     * - direction
       - |vector|
       - Alternative (and exclusive) to `to_world`. Direction towards which the
@@ -82,8 +84,9 @@ public:
         MTS_MASKED_FUNCTION(ProfilerPhase::EndpointSampleRay, active);
 
         // 1. Sample spectrum
-        auto [wavelengths, weight] =
-            sample_wavelength<Float, Spectrum>(wavelength_sample);
+        auto [wavelengths, spec_weight] = m_irradiance->sample_spectrum(
+            zero<SurfaceInteraction3f>(),
+            math::sample_shifted<Wavelength>(wavelength_sample), active);
 
         // 2. Sample spatial component
         const Transform4f &trafo = m_world_transform->eval(time, active);
@@ -98,7 +101,7 @@ public:
         return std::make_pair(
             Ray3f(m_bsphere.center + (perp_offset - d) * m_bsphere.radius, d,
                   time, wavelengths),
-            unpolarized<Spectrum>(weight) *
+            unpolarized<Spectrum>(spec_weight) *
                 (math::Pi<Float> * sqr(m_bsphere.radius)));
     }
 
@@ -126,8 +129,9 @@ public:
         si.wavelengths          = it.wavelengths;
 
         // No need to divide by the PDF here (always equal to 1.f)
-        return std::make_pair(
-            ds, unpolarized<Spectrum>(m_irradiance->eval(si, active)));
+        UnpolarizedSpectrum spec = m_irradiance->eval(si, active);
+
+        return { ds, unpolarized<Spectrum>(spec) };
     }
 
     Float pdf_direction(const Interaction3f & /*it*/,

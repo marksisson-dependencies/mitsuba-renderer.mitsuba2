@@ -43,9 +43,9 @@ def generate_fixture(variant):
     globals()['variant_' + variant] = fixture
 
 
-for variant in ['scalar_rgb', 'scalar_spectral',
+for variant in ['scalar_rgb', 'scalar_spectral', 'scalar_spectral_polarized',
                 'scalar_mono_polarized', 'packet_rgb',
-                'packet_spectral']:
+                'packet_spectral', 'gpu_rgb', 'gpu_autodiff_rgb']:
     generate_fixture(variant)
 del generate_fixture
 
@@ -93,7 +93,7 @@ def variants_all_rgb(request):
 def pytest_configure(config):
     markexpr = config.getoption("markexpr", 'False')
     if not 'not slow' in markexpr:
-        print("""\033[93mRunning the full test suite. To skip slow tests, please run 'pytest -m 'not slow' \033[0m""")
+        print("""\033[93mRunning the full test suite. To skip slow tests, please run 'pytest -m "not slow"' \033[0m""")
 
     config.addinivalue_line(
         "markers", "slow: marks tests as slow (deselect with -m 'not slow')"

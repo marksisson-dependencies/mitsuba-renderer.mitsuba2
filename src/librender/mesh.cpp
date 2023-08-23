@@ -7,6 +7,7 @@
 #include <mitsuba/render/interaction.h>
 #include <mitsuba/render/mesh.h>
 #include <mitsuba/render/records.h>
+#include <mitsuba/render/scene.h>
 #include <mutex>
 
 #if defined(MTS_ENABLE_EMBREE)
@@ -14,7 +15,6 @@
 #endif
 
 #if defined(MTS_ENABLE_OPTIX)
-    #include <mitsuba/render/optix_api.h>
 # if defined(MTS_USE_OPTIX_HEADERS)
     #include <optix_function_table_definition.h>
 # endif
@@ -29,7 +29,6 @@ MTS_VARIANT Mesh<Float, Spectrum>::Mesh(const Properties &props) : Base(props) {
        appearance. Default: ``false`` */
     if (props.bool_("face_normals", false))
         m_disable_vertex_normals = true;
-    m_mesh = true;
 }
 
 MTS_VARIANT
@@ -50,7 +49,9 @@ Mesh<Float, Spectrum>::Mesh(const std::string &name, ScalarSize vertex_count,
     m_vertex_normals_buf.managed();
     m_vertex_texcoords_buf.managed();
 
-    m_mesh = true;
+    if constexpr (is_cuda_array_v<Float>)
+        cuda_sync();
+
     set_children();
 }
 
@@ -281,29 +282,60 @@ MTS_VARIANT void Mesh<Float, Spectrum>::recompute_bbox() {
         m_bbox.expand(vertex_position(i));
 }
 
-MTS_VARIANT void Mesh<Float, Spectrum>::area_distr_build() {
+MTS_VARIANT void Mesh<Float, Spectrum>::build_pmf() {
+    std::lock_guard<tbb::spin_mutex> lock(m_mutex);
+
+    if (!m_area_pmf.empty())
+        return; // already built!
+
     if (m_face_count == 0)
         Throw("Cannot create sampling table for an empty mesh: %s", to_string());
 
-    std::lock_guard<tbb::spin_mutex> lock(m_mutex);
-    // TODO could use manage() as area_distr doesn't need to be differentiable
+    // TODO could use manage() as area_pmf doesn't need to be differentiable
     if constexpr (!is_dynamic_v<Float>) {
         std::vector<ScalarFloat> table(m_face_count);
         for (ScalarIndex i = 0; i < m_face_count; i++)
             table[i] = face_area(i);
 
-        m_area_distr = DiscreteDistribution<Float>(
+        m_area_pmf = DiscreteDistribution<Float>(
             table.data(),
             m_face_count
         );
     } else {
         Float table = face_area(arange<UInt32>(m_face_count)).managed();
 
-        m_area_distr = DiscreteDistribution<Float>(
+        m_area_pmf = DiscreteDistribution<Float>(
             table.data(),
             m_face_count
         );
     }
+}
+
+MTS_VARIANT void Mesh<Float, Spectrum>::build_parameterization() {
+    std::lock_guard<tbb::spin_mutex> lock(m_mutex);
+    if (m_parameterization)
+        return; // already built!
+
+    if (!has_vertex_texcoords())
+        Throw("eval_parameterization(): mesh does not have UV coordinates!");
+
+    Properties props;
+    ref<Mesh> mesh =
+        new Mesh(m_name + "_param", m_vertex_count, m_face_count,
+                 props, false, false);
+    mesh->m_faces_buf = m_faces_buf;
+
+    ScalarFloat *pos_out = (ScalarFloat *) mesh->m_vertex_positions_buf.data();
+    for (size_t i = 0; i < m_vertex_count; ++i) {
+        ScalarPoint2f uv_i = vertex_texcoord(i);
+        pos_out[i*3 + 0] = uv_i.x();
+        pos_out[i*3 + 1] = uv_i.y();
+        pos_out[i*3 + 2] = 0.f;
+    }
+    mesh->recompute_bbox();
+
+    props.set_object("mesh", mesh.get());
+    m_parameterization = new Scene<Float, Spectrum>(props);
 }
 
 MTS_VARIANT typename Mesh<Float, Spectrum>::ScalarSize
@@ -313,18 +345,18 @@ Mesh<Float, Spectrum>::primitive_count() const {
 
 MTS_VARIANT typename Mesh<Float, Spectrum>::ScalarFloat
 Mesh<Float, Spectrum>::surface_area() const {
-    area_distr_ensure();
-    return m_area_distr.sum();
+    ensure_pmf_built();
+    return m_area_pmf.sum();
 }
 
 MTS_VARIANT typename Mesh<Float, Spectrum>::PositionSample3f
 Mesh<Float, Spectrum>::sample_position(Float time, const Point2f &sample_, Mask active) const {
-    area_distr_ensure();
+    ensure_pmf_built();
 
     using Index = replace_scalar_t<Float, ScalarIndex>;
     Index face_idx;
     Point2f sample = sample_;
-    std::tie(face_idx, sample.y()) = m_area_distr.sample_reuse(sample.y(), active);
+    std::tie(face_idx, sample.y()) = m_area_pmf.sample_reuse(sample.y(), active);
 
     Array<Index, 3> fi = face_indices(face_idx, active);
 
@@ -338,7 +370,7 @@ Mesh<Float, Spectrum>::sample_position(Float time, const Point2f &sample_, Mask 
     PositionSample3f ps;
     ps.p     = p0 + e0 * b.x() + e1 * b.y();
     ps.time  = time;
-    ps.pdf   = m_area_distr.normalization();
+    ps.pdf   = m_area_pmf.normalization();
     ps.delta = false;
 
     if (has_vertex_texcoords()) {
@@ -364,9 +396,27 @@ Mesh<Float, Spectrum>::sample_position(Float time, const Point2f &sample_, Mask 
     return ps;
 }
 
+MTS_VARIANT typename Mesh<Float, Spectrum>::SurfaceInteraction3f
+Mesh<Float, Spectrum>::eval_parameterization(const Point2f &uv,
+                                             Mask active) const {
+    if (!m_parameterization)
+        const_cast<Mesh *>(this)->build_parameterization();
+
+    Ray3f ray(Point3f(uv.x(), uv.y(), -1), Vector3f(0, 0, 1), 0, 0);
+
+    PreliminaryIntersection3f pi = m_parameterization->ray_intersect_preliminary(ray, active);
+
+    if (none_or<false>(pi.is_valid()))
+        return SurfaceInteraction3f();
+
+    pi.shape = this;
+
+    return pi.compute_surface_interaction(ray, HitComputeFlags::All, active);
+}
+
 MTS_VARIANT Float Mesh<Float, Spectrum>::pdf_position(const PositionSample3f &, Mask) const {
-    area_distr_ensure();
-    return m_area_distr.normalization();
+    ensure_pmf_built();
+    return m_area_pmf.normalization();
 }
 
 MTS_VARIANT typename Mesh<Float, Spectrum>::Point3f
@@ -383,7 +433,7 @@ Mesh<Float, Spectrum>::barycentric_coordinates(const SurfaceInteraction3f &si,
              dv  = p2 - p0;
 
     /* Solve a least squares problem to determine
-    the UV coordinates within the current triangle */
+       the UV coordinates within the current triangle */
     Float b1  = dot(du, rel), b2 = dot(dv, rel),
           a11 = dot(du, du), a12 = dot(du, dv),
           a22 = dot(dv, dv),
@@ -396,17 +446,29 @@ Mesh<Float, Spectrum>::barycentric_coordinates(const SurfaceInteraction3f &si,
     return {w, u, v};
 }
 
-MTS_VARIANT void Mesh<Float, Spectrum>::fill_surface_interaction(const Ray3f & /*ray*/,
-                                                                 const Float *cache,
-                                                                 SurfaceInteraction3f &si,
-                                                                 Mask active) const {
-    // Barycentric coordinates within triangle
-    Float b1 = cache[0],
-          b2 = cache[1];
+MTS_VARIANT typename Mesh<Float, Spectrum>::SurfaceInteraction3f
+Mesh<Float, Spectrum>::compute_surface_interaction(const Ray3f &ray,
+                                                   PreliminaryIntersection3f pi,
+                                                   HitComputeFlags flags,
+                                                   Mask active) const {
+    MTS_MASK_ARGUMENT(active);
 
+    bool differentiable = false;
+    if constexpr (is_diff_array_v<Float>)
+        differentiable = requires_gradient(m_vertex_positions_buf) ||
+                         requires_gradient(ray.o) || requires_gradient(ray.d);
+
+    // Recompute ray intersection to get differentiable prim_uv and t
+    if (differentiable && !has_flag(flags, HitComputeFlags::NonDifferentiable))
+        pi = ray_intersect_triangle(pi.prim_index, ray, active);
+
+    active &= pi.is_valid();
+
+    Float b1 = pi.prim_uv.x();
+    Float b2 = pi.prim_uv.y();
     Float b0 = 1.f - b1 - b2;
 
-    auto fi = face_indices(si.prim_index, active);
+    auto fi = face_indices(pi.prim_index, active);
 
     Point3f p0 = vertex_position(fi[0], active),
             p1 = vertex_position(fi[1], active),
@@ -415,85 +477,71 @@ MTS_VARIANT void Mesh<Float, Spectrum>::fill_surface_interaction(const Ray3f & /
     Vector3f dp0 = p1 - p0,
              dp1 = p2 - p0;
 
+    SurfaceInteraction3f si = zero<SurfaceInteraction3f>();
+    si.t = select(active, pi.t, math::Infinity<Float>);
+
     // Re-interpolate intersection using barycentric coordinates
-    si.p[active] = p0 * b0 + p1 * b1 + p2 * b2;
+    si.p = p0 * b0 + p1 * b1 + p2 * b2;
 
     // Face normal
-    Normal3f n = normalize(cross(dp0, dp1));
-    si.n[active] = n;
+    si.n = normalize(cross(dp0, dp1));
 
     // Texture coordinates (if available)
-    auto [dp_du, dp_dv] = coordinate_system(n);
-    Point2f uv(b1, b2);
-    if (has_vertex_texcoords()) {
+    si.uv = Point2f(b1, b2);
+    std::tie(si.dp_du, si.dp_dv) = coordinate_system(si.n);
+    if (has_vertex_texcoords() && likely(has_flag(flags, HitComputeFlags::UV))) {
         Point2f uv0 = vertex_texcoord(fi[0], active),
                 uv1 = vertex_texcoord(fi[1], active),
                 uv2 = vertex_texcoord(fi[2], active);
 
-        uv = uv0 * b0 + uv1 * b1 + uv2 * b2;
+        si.uv = uv0 * b0 + uv1 * b1 + uv2 * b2;
 
-        Vector2f duv0 = uv1 - uv0,
-                 duv1 = uv2 - uv0;
+        if (likely(has_flag(flags, HitComputeFlags::dPdUV))) {
+            Vector2f duv0 = uv1 - uv0,
+                     duv1 = uv2 - uv0;
 
-        Float det     = fmsub(duv0.x(), duv1.y(), duv0.y() * duv1.x()),
-              inv_det = rcp(det);
+            Float det     = fmsub(duv0.x(), duv1.y(), duv0.y() * duv1.x()),
+                  inv_det = rcp(det);
 
-        Mask valid = neq(det, 0.f);
+            Mask valid = neq(det, 0.f);
 
-        dp_du[valid] = fmsub( duv1.y(), dp0, duv0.y() * dp1) * inv_det;
-        dp_dv[valid] = fnmadd(duv1.x(), dp0, duv0.x() * dp1) * inv_det;
+            si.dp_du[valid] = fmsub( duv1.y(), dp0, duv0.y() * dp1) * inv_det;
+            si.dp_dv[valid] = fnmadd(duv1.x(), dp0, duv0.x() * dp1) * inv_det;
+        }
     }
-    si.uv[active] = uv;
 
     // Shading normal (if available)
-    if (has_vertex_normals()) {
+    if (has_vertex_normals() && likely(has_flag(flags, HitComputeFlags::ShadingFrame))) {
         Normal3f n0 = vertex_normal(fi[0], active),
                  n1 = vertex_normal(fi[1], active),
                  n2 = vertex_normal(fi[2], active);
 
-        n = normalize(n0 * b0 + n1 * b1 + n2 * b2);
+        si.sh_frame.n = normalize(n0 * b0 + n1 * b1 + n2 * b2);
+
+        si.dn_du = si.dn_dv = zero<Vector3f>();
+        if (has_flag(flags, HitComputeFlags::dNSdUV)) {
+            /* Now compute the derivative of "normalize(u*n1 + v*n2 + (1-u-v)*n0)"
+               with respect to [u, v] in the local triangle parameterization.
+
+               Since d/du [f(u)/|f(u)|] = [d/du f(u)]/|f(u)|
+                   - f(u)/|f(u)|^3 <f(u), d/du f(u)>, this results in
+            */
+
+            Normal3f N = b0 * n1 + b1 * n2 + b2 * n0;
+            Float il = rsqrt(squared_norm(N));
+            N *= il;
+
+            si.dn_du = (n1 - n0) * il;
+            si.dn_dv = (n2 - n0) * il;
+
+            si.dn_du = fnmadd(N, dot(N, si.dn_du), si.dn_du);
+            si.dn_dv = fnmadd(N, dot(N, si.dn_dv), si.dn_dv);
+        }
+    } else {
+        si.sh_frame.n = si.n;
     }
 
-    si.sh_frame.n[active] = n;
-
-    // Tangents
-    si.dp_du[active] = dp_du;
-    si.dp_dv[active] = dp_dv;
-}
-
-MTS_VARIANT std::pair<typename Mesh<Float, Spectrum>::Vector3f, typename Mesh<Float, Spectrum>::Vector3f>
-Mesh<Float, Spectrum>::normal_derivative(const SurfaceInteraction3f &si, bool shading_frame,
-                                         Mask active) const {
-    Assert(has_vertex_normals());
-
-    if (!shading_frame)
-        return { zero<Vector3f>(), zero<Vector3f>() };
-
-    auto fi = face_indices(si.prim_index, active);
-    Point3f b = barycentric_coordinates(si, active);
-
-    Normal3f n0 = vertex_normal(fi[0], active),
-             n1 = vertex_normal(fi[1], active),
-             n2 = vertex_normal(fi[2], active);
-
-    /* Now compute the derivative of "normalize(u*n1 + v*n2 + (1-u-v)*n0)"
-       with respect to [u, v] in the local triangle parameterization.
-
-       Since d/du [f(u)/|f(u)|] = [d/du f(u)]/|f(u)|
-         - f(u)/|f(u)|^3 <f(u), d/du f(u)>, this results in
-    */
-
-    Normal3f N(b[0] * n1 + b[1] * n2 + b[2] * n0);
-    Float il = rsqrt(squared_norm(N));
-    N *= il;
-
-    Vector3f dndu = (n1 - n0) * il;
-    Vector3f dndv = (n2 - n0) * il;
-
-    dndu = fnmadd(N, dot(N, dndu), dndu);
-    dndv = fnmadd(N, dot(N, dndv), dndv);
-
-    return { dndu, dndv };
+    return si;
 }
 
 MTS_VARIANT void Mesh<Float, Spectrum>::add_attribute(const std::string& name,
@@ -686,15 +734,17 @@ MTS_VARIANT std::string Mesh<Float, Spectrum>::to_string() const {
         << "  vertex_count = " << m_vertex_count << "," << std::endl
         << "  vertices = [" << util::mem_string(vertex_data_bytes() * m_vertex_count) << " of vertex data]," << std::endl
         << "  face_count = " << m_face_count << "," << std::endl
-        << "  faces = [" << util::mem_string(face_data_bytes() * m_face_count) << " of face data]," << std::endl
-        << "  disable_vertex_normals = " << m_disable_vertex_normals << "," << std::endl
-        << "  surface_area = " << m_area_distr.sum();
+        << "  faces = [" << util::mem_string(face_data_bytes() * m_face_count) << " of face data]," << std::endl;
+
+    if (!m_area_pmf.empty())
+        oss << "  surface_area = " << m_area_pmf.sum() << "," << std::endl;
+
+    oss << "  disable_vertex_normals = " << m_disable_vertex_normals;
 
     if (!m_mesh_attributes.empty()) {
-        oss << "," << std::endl
-            << "  mesh attributes = [" << std::endl;
+        oss << "," << std::endl << "  mesh attributes = [" << std::endl;
         size_t i = 0;
-        for(const auto&[name, attribute]: m_mesh_attributes)
+        for(const auto &[name, attribute]: m_mesh_attributes)
             oss << "    " << name << ": " << attribute.size
                 << (attribute.size == 1 ? " float" : " floats")
                 << (++i == m_mesh_attributes.size() ? "" : ",") << std::endl;
@@ -702,6 +752,7 @@ MTS_VARIANT std::string Mesh<Float, Spectrum>::to_string() const {
     } else {
         oss << std::endl;
     }
+
     oss << "]";
     return oss.str();
 }
@@ -732,7 +783,7 @@ MTS_VARIANT size_t Mesh<Float, Spectrum>::face_data_bytes() const {
 }
 
 #if defined(MTS_ENABLE_EMBREE)
-MTS_VARIANT RTCGeometry Mesh<Float, Spectrum>::embree_geometry(RTCDevice device) const {
+MTS_VARIANT RTCGeometry Mesh<Float, Spectrum>::embree_geometry(RTCDevice device) {
     RTCGeometry geom = rtcNewGeometry(device, RTC_GEOMETRY_TYPE_TRIANGLE);
 
     rtcSetSharedGeometryBuffer(geom, RTC_BUFFER_TYPE_VERTEX, 0, RTC_FORMAT_FLOAT3,
@@ -748,7 +799,7 @@ MTS_VARIANT RTCGeometry Mesh<Float, Spectrum>::embree_geometry(RTCDevice device)
 #endif
 
 #if defined(MTS_ENABLE_OPTIX)
-MTS_VARIANT const uint32_t Mesh<Float, Spectrum>::triangle_input_flags[1] = { OPTIX_GEOMETRY_FLAG_NONE };
+static const uint32_t triangle_input_flags =  OPTIX_GEOMETRY_FLAG_DISABLE_ANYHIT;
 
 MTS_VARIANT void Mesh<Float, Spectrum>::optix_prepare_geometry() {
     if constexpr (is_cuda_array_v<Float>) {
@@ -776,7 +827,7 @@ MTS_VARIANT void Mesh<Float, Spectrum>::optix_build_input(OptixBuildInput &build
     build_input.triangleArray.vertexBuffers    = (CUdeviceptr*) &m_vertex_buffer_ptr;
     build_input.triangleArray.numIndexTriplets = m_face_count;
     build_input.triangleArray.indexBuffer      = (CUdeviceptr)m_faces_buf.data();
-    build_input.triangleArray.flags            = triangle_input_flags;
+    build_input.triangleArray.flags            = &triangle_input_flags;
     build_input.triangleArray.numSbtRecords    = 1;
 }
 #endif
@@ -790,22 +841,47 @@ MTS_VARIANT void Mesh<Float, Spectrum>::traverse(TraversalCallback *callback) {
     callback->put_parameter("vertex_positions_buf", m_vertex_positions_buf);
     callback->put_parameter("vertex_normals_buf",   m_vertex_normals_buf);
     callback->put_parameter("vertex_texcoords_buf", m_vertex_texcoords_buf);
-    for(auto&[name, attribute]: m_mesh_attributes)
+
+    for(auto &[name, attribute]: m_mesh_attributes)
         callback->put_parameter(tfm::format("%s_buf", name.c_str()), attribute.buf);
 }
 
 MTS_VARIANT void Mesh<Float, Spectrum>::parameters_changed(const std::vector<std::string> &keys) {
     if (keys.empty() || string::contains(keys, "vertex_positions_buf")) {
-        if (has_vertex_normals())
-            recompute_vertex_normals();
+        if constexpr (is_cuda_array_v<Float>) {
+            m_vertex_positions_buf.managed();
+            cuda_eval();
+            cuda_sync();
+        }
 
         recompute_bbox();
 
-        area_distr_build();
+        if (has_vertex_normals())
+            recompute_vertex_normals();
+
+        if (!m_area_pmf.empty())
+            m_area_pmf = DiscreteDistribution<Float>();
+
+        if (m_parameterization)
+            m_parameterization = nullptr;
+
+#if defined(MTS_ENABLE_OPTIX)
+        optix_prepare_geometry();
+#endif
+
         Base::parameters_changed();
     }
 }
 
+MTS_VARIANT bool Mesh<Float, Spectrum>::parameters_grad_enabled() const {
+    if constexpr (is_diff_array_v<Float>) {
+        return requires_gradient(m_vertex_positions_buf) ||
+               requires_gradient(m_vertex_normals_buf) ||
+               requires_gradient(m_vertex_texcoords_buf);
+    }
+
+    return false;
+}
 
 MTS_IMPLEMENT_CLASS_VARIANT(Mesh, Shape)
 MTS_INSTANTIATE_CLASS(Mesh)
