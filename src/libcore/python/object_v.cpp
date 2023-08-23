@@ -1,6 +1,6 @@
-#include <mitsuba/python/python.h>
 #include <mitsuba/core/transform.h>
 #include <mitsuba/core/frame.h>
+#include <mitsuba/python/python.h>
 
 #define GET_ATTR(T)                                                                                \
     if (strcmp(type.name(), typeid(T).name()) == 0)                                                \
@@ -18,6 +18,8 @@ MTS_PY_EXPORT(Object) {
     m.def("get_property", [](const void *ptr, void *type_, py::handle parent) -> py::object {
         const std::type_info &type = *(const std::type_info *) type_;
         GET_ATTR(Float);
+        GET_ATTR(Int32);
+        GET_ATTR(UInt32);
         GET_ATTR(DynamicBuffer<Float>);
         GET_ATTR(DynamicBuffer<Int32>);
         GET_ATTR(DynamicBuffer<UInt32>);
@@ -70,7 +72,9 @@ MTS_PY_EXPORT(Object) {
 
     m.def("set_property", [](const void *ptr, void *type_, py::handle handle) {
         const std::type_info &type = *(const std::type_info *) type_;
-
+        SET_ATTR(Float);
+        SET_ATTR(Int32);
+        SET_ATTR(UInt32);
         SET_ATTR(DynamicBuffer<Float>);
         SET_ATTR(DynamicBuffer<Int32>);
         SET_ATTR(DynamicBuffer<UInt32>);

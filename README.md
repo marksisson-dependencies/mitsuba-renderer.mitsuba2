@@ -22,6 +22,15 @@
 [1]: https://readthedocs.org/projects/mitsuba2/badge/?version=latest
 [2]: https://mitsuba2.readthedocs.io/en/latest/src/getting_started/intro.html
 
+## This repository is deprecated
+
+*NOTE*: [Mitsuba 3](https://github.com/mitsuba-renderer/mitsuba3) has recently
+been released, which addresses many long-standing limitations of Mitsuba 2.
+This repository is therefore deprecated: it will not receive updates or
+bugfixes, and we recommend that you migrate to Mitsuba 3.
+
+## Introduction
+
 Mitsuba 2 is a research-oriented rendering system written in portable C++17. It
 consists of a small set of core libraries and a wide variety of plugins that
 implement functionality ranging from materials and light sources to complete
@@ -89,6 +98,7 @@ This project was created by [Wenzel Jakob](http://rgl.epfl.ch/people/wjakob).
 Significant features and/or improvements to the code were contributed by
 [Merlin Nimier-David](https://merlin.nimierdavid.fr/),
 [Guillaume Loubet](https://maverick.inria.fr/Membres/Guillaume.Loubet/),
+[Benoît Ruiz](https://github.com/4str0m),
 [Sébastien Speierer](https://github.com/Speierers),
 [Delio Vicini](https://dvicini.github.io/),
 and [Tizian Zeltner](https://tizianzeltner.com/).

@@ -69,12 +69,13 @@ public:
         // Scalar-typed opacity texture
         m_opacity = props.texture<Texture>("opacity", 0.5f);
 
-        for (auto &kv : props.objects()) {
-            auto *bsdf = dynamic_cast<Base *>(kv.second.get());
+        for (auto &[name, obj] : props.objects(false)) {
+            auto *bsdf = dynamic_cast<Base *>(obj.get());
             if (bsdf) {
                 if (m_nested_bsdf)
                     Throw("Cannot specify more than one child BSDF");
                 m_nested_bsdf = bsdf;
+                props.mark_queried(name);
             }
         }
         if (!m_nested_bsdf)
@@ -154,6 +155,12 @@ public:
         return result;
     }
 
+    Spectrum eval_null_transmission(const SurfaceInteraction3f &si,
+                                    Mask active) const override {
+        Float opacity = eval_opacity(si, active);
+        return 1 - opacity * (1 - m_nested_bsdf->eval_null_transmission(si, active));
+    }
+
     MTS_INLINE Float eval_opacity(const SurfaceInteraction3f &si, Mask active) const {
         return clamp(m_opacity->eval_1(si, active), 0.f, 1.f);
     }
@@ -167,7 +174,7 @@ public:
         std::ostringstream oss;
         oss << "Mask[" << std::endl
             << "  opacity = " << m_opacity << "," << std::endl
-            << "  nested_bsdf = " << string::indent(m_nested_bsdf->to_string()) << std::endl
+            << "  nested_bsdf = " << string::indent(m_nested_bsdf) << std::endl
             << "]";
         return oss.str();
     }

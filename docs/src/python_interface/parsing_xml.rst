@@ -88,7 +88,7 @@ A more convinient way of constructing Mitsuba objects in Python is to use
 should follow a structure similar to the XML structure used for the Mitsuba scene description.
 
 The dictionary should always contain an entry ``"type"`` to specify the name of the plugin to
-be instanciated. Keys of the dictionary must be strings and will represent the name of the
+be instantiated. Keys of the dictionary must be strings and will represent the name of the
 properties. The type of the property will be deduced from the Python type for simple
 types (e.g. ``bool``, ``float``, ``int``, ``string``, ...). It is possible to provide another dictionary as
 the value of an entry. This can be used to create nested objects, as in the XML scene description.
@@ -178,7 +178,7 @@ Here as some examples of the possible use of the ``"value"`` entry in the nested
     # Providing a spectral file
     "color_property" : {
         "type": "spectrum",
-        "value": "filename.spd"
+        "filename": "filename.spd"
     }
 
     # Providing a list of (wavelength, value) pairs
@@ -200,9 +200,9 @@ The following example constructs a Mitsuba scene using :py:func:`mitsuba.core.xm
             "type" : "perspective",
             "near_clip": 1.0,
             "far_clip": 1000.0,
-            "to_world" : Transform4f.look_at(origin=[1, 1, 1],
-                                             target=[0, 0, 0],
-                                             up=[0, 0, 1]),
+            "to_world" : ScalarTransform4f.look_at(origin=[1, 1, 1],
+                                                   target=[0, 0, 0],
+                                                   up=[0, 0, 1]),
             "myfilm" : {
                 "type" : "hdrfilm",
                 "rfilter" : { "type" : "box"},

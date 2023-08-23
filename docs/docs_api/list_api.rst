@@ -28,6 +28,8 @@
 
 .. autoclass:: mitsuba.core.DiscreteDistribution
 
+.. autoclass:: mitsuba.core.DiscreteDistribution2D
+
 .. autoclass:: mitsuba.core.DummyStream
 
 .. autoclass:: mitsuba.core.FileResolver
@@ -117,6 +119,8 @@
 .. autoclass:: mitsuba.core.Object
 
 .. autoclass:: mitsuba.core.PCG32
+
+.. autoclass:: mitsuba.core.PluginManager
 
 .. autoclass:: mitsuba.core.Point0f
 
@@ -340,6 +344,8 @@
 
 .. autofunction:: mitsuba.core.is_spectral
 
+.. autofunction:: mitsuba.core.luminance
+
 .. autofunction:: mitsuba.core.math.E
 
 .. autofunction:: mitsuba.core.math.Epsilon
@@ -412,6 +418,10 @@
 
 .. autofunction:: mitsuba.core.pdf_uniform_spectrum
 
+.. autofunction:: mitsuba.core.permute
+
+.. autofunction:: mitsuba.core.permute_kensler
+
 .. autofunction:: mitsuba.core.quad.composite_simpson
 
 .. autofunction:: mitsuba.core.quad.composite_simpson_38
@@ -420,7 +430,11 @@
 
 .. autofunction:: mitsuba.core.quad.gauss_lobatto
 
+.. autofunction:: mitsuba.core.radical_inverse_2
+
 .. autofunction:: mitsuba.core.sample_rgb_spectrum
+
+.. autofunction:: mitsuba.core.sample_tea_32
 
 .. autofunction:: mitsuba.core.sample_tea_float
 
@@ -433,6 +447,8 @@
 .. autofunction:: mitsuba.core.set_property
 
 .. autofunction:: mitsuba.core.set_thread_count
+
+.. autofunction:: mitsuba.core.sobol_2
 
 .. autofunction:: mitsuba.core.spline.eval_1d
 
@@ -576,6 +592,8 @@
 
 .. autoclass:: mitsuba.render.Film
 
+.. autoclass:: mitsuba.render.HitComputeFlags
+
 .. autoclass:: mitsuba.render.ImageBlock
 
 .. autoclass:: mitsuba.render.Integrator
@@ -601,6 +619,8 @@
 .. autoclass:: mitsuba.render.PhaseFunctionFlags
 
 .. autoclass:: mitsuba.render.PositionSample3f
+
+.. autoclass:: mitsuba.render.PreliminaryIntersection3f
 
 .. autoclass:: mitsuba.render.ProjectiveCamera
 
@@ -725,6 +745,14 @@
 .. autofunction:: mitsuba.python.autodiff.render_torch
 
 .. autofunction:: mitsuba.python.autodiff.write_bitmap
+
+.. autoclass:: mitsuba.python.xml.Files
+
+.. autoclass:: mitsuba.python.xml.WriteXML
+
+.. autofunction:: mitsuba.python.xml.copy2
+
+.. autofunction:: mitsuba.python.xml.dict_to_xml
 
 .. autofunction:: mitsuba.python.test.util.fresolver_append_path
 

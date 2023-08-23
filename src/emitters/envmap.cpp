@@ -22,9 +22,11 @@ Environment emitter (:monosp:`envmap`)
  * - filename
    - |string|
    - Filename of the radiance-valued input image to be loaded; must be in latitude-longitude format.
+
  * - scale
    - |Float|
    - A scale factor that is applied to the radiance values stored in the input image. (Default: 1.0)
+
  * - to_world
    - |transform|
    - Specifies an optional emitter-to-world transformation.  (Default: none, i.e. emitter space = world space)
@@ -109,7 +111,7 @@ public:
                 }
 
                 *lum_ptr++ = lum * sin_theta;
-                store(ptr, coeff);
+                store_unaligned(ptr, coeff);
                 ptr += 4;
             }
         }
@@ -258,7 +260,7 @@ public:
         oss << "EnvironmentMapEmitter[" << std::endl
             << "  filename = \"" << m_filename << "\"," << std::endl
             << "  resolution = \"" << m_resolution << "\"," << std::endl
-            << "  bsphere = " << m_bsphere << std::endl
+            << "  bsphere = " << string::indent(m_bsphere) << std::endl
             << "]";
         return oss.str();
     }

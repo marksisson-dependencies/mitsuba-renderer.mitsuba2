@@ -99,7 +99,7 @@ more complex example:
              (compact) binary representation -->
         <shape type="serialized">
             <string name="filename" value="lightsource.serialized"/>
-            <transform name="toWorld">
+            <transform name="to_world">
                 <translate x="5" y="-3" z="1"/>
             </transform>
 
@@ -407,7 +407,6 @@ precedence when no command line arguments are given. The syntax for this is:
 
 and must precede the occurrences of the parameter in the XML file.
 
-
 Including external files
 ------------------------
 
@@ -444,3 +443,15 @@ can be accomplished using the ``alias as=".."`` tag:
 After this statement, the diffuse scattering model will be bound to *both*
 identifiers ``my_material_1`` and ``my_material_2``.
 
+External resource folders
+-------------------------
+
+Using the ``path`` tag, it is possible to add a path to the list of search paths. This can
+be useful for instance when some meshes and textures are stored in a different directory, (e.g. when
+shared with other scenes). If the path is a relative path, Mitsuba 2 will first try to interpret it
+relative to the scene directory, then to other paths that are already on the search path (e.g. added
+using the ``-a <path1>;<path2>;..`` command line argument).
+
+.. code-block:: xml
+
+    <path value="../../my_resources"/>
